@@ -205,6 +205,13 @@ class BehaveAgent(metaclass=Singleton):
                     "mime": mimetypes.guess_type(file_to_attach)[0]
                     or "application/octet-stream",
                 }
+                self._rp.log(
+                    time=timestamp(),
+                    message=message,
+                    level=level,
+                    attachment=attachment,
+                    item_id=item_id,
+                )
         self._rp.log(
             time=timestamp(),
             message=message,
