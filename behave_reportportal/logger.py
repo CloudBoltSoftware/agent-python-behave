@@ -32,7 +32,7 @@ class RPLogger(Logger):
                 extra["file_to_attach"] = file_to_attach
             if is_launch_log:
                 extra["is_launch_log"] = is_launch_log
-        super()._log(level, msg, args, exc_info, extra, stack_info, stacklevel)
+        super()._log(level, msg, args, exc_info, extra, stack_info)
 
     def makeRecord(
         self,
