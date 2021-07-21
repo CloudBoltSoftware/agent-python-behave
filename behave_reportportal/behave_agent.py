@@ -3,6 +3,7 @@ import mimetypes
 import os
 from functools import wraps
 from os import getenv
+import logging
 
 from prettytable import PrettyTable
 from reportportal_client import ReportPortalService
@@ -47,6 +48,16 @@ def create_rp_service(cfg):
 
 class BehaveAgent(metaclass=Singleton):
     """Functionality for integration of Behave tests with Report Portal."""
+
+    _loglevel_map = {
+        logging.NOTSET: 'TRACE',
+        logging.DEBUG: 'DEBUG',
+        logging.INFO: 'INFO',
+        logging.WARNING: 'WARN',
+        logging.ERROR: 'ERROR',
+        logging.CRITICAL: 'ERROR',
+    }
+    _sorted_levelnos = sorted(_loglevel_map.keys(), reverse=True)
 
     def __init__(self, cfg, rp_service=None):
         """Initialize instance attributes."""
@@ -179,48 +190,31 @@ class BehaveAgent(metaclass=Singleton):
         self._finish_step_scenario_based(step, **kwargs)
 
     @check_rp_enabled
-    def post_log(
-        self, message, level="INFO", item_id=None, file_to_attach=None
-    ):
-        """Post log message to current test item."""
-        self._log(
-            message,
-            level,
-            file_to_attach=file_to_attach,
-            item_id=item_id or self._log_item_id,
-        )
+    def post_log(self, message, loglevel='INFO', attachment=None):
+        """
+        Send a log message to the Report Portal.
+        :param message:    message in log body
+        :param loglevel:   a level of a log entry (ERROR, WARN, INFO, DEBUG,
+        TRACE, FATAL, UNKNOWN)
+        :param attachment: attachment file
+        :return: None
+        """
+        if self._rp is None:
+            return
 
-    @check_rp_enabled
-    def post_launch_log(self, message, level="INFO", file_to_attach=None):
-        """Post log message to launch."""
-        self._log(message, level, file_to_attach=file_to_attach)
+        if loglevel not in self._loglevels:
+            log.warning('Incorrect loglevel = %s. Force set to INFO. '
+                        'Available levels: %s.', loglevel, self._loglevels)
+            loglevel = 'INFO'
 
-    def _log(self, message, level, file_to_attach=None, item_id=None):
-        attachment = None
-        if file_to_attach:
-            with open(file_to_attach, "rb") as f:
-                attachment = {
-                    "name": os.path.basename(file_to_attach),
-                    "data": f.read(),
-                    "mime": mimetypes.guess_type(file_to_attach)[0]
-                    or "application/octet-stream",
-                }
-                print(
-                    f'name: {attachment["name"]}, mime: {attachment["mime"]}')
-                self._rp.log(
-                    time=timestamp(),
-                    message=message,
-                    level=level,
-                    attachment=attachment,
-                    item_id=item_id,
-                )
-        self._rp.log(
-            time=timestamp(),
-            message=message,
-            level=level,
-            attachment=attachment,
-            item_id=item_id,
-        )
+        sl_rq = {
+            'item_id': self.log_item_id,
+            'time': timestamp(),
+            'message': message,
+            'level': loglevel,
+            'attachment': attachment
+        }
+        self._rp.log(**sl_rq)
 
     def _get_launch_attributes(self):
         """Return launch attributes in the format supported by the rp."""
