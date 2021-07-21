@@ -61,16 +61,28 @@ class BehaveAgent(metaclass=Singleton):
 
     def __init__(self, cfg, rp_service=None):
         """Initialize instance attributes."""
-        self._rp = rp_service
         self._cfg = cfg
-        self._launch_id = None
+        self._errors = queue.Queue()
         self._feature_id = None
-        self._scenario_id = None
-        self._step_id = None
+        self._hier_parts = {}
+        self._issue_types = {}
+        self._item_parts = {}
+        self._launch_id = None
         self._log_item_id = None
+        self._loglevels = ('TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR')
+        self._rp = rp_service
+        self._scenario_id = None
         self._skip_analytics = getenv("AGENT_NO_ANALYTICS")
+        self._step_id = None
         self.agent_name = "behave-reportportal"
         self.agent_version = get_package_version(self.agent_name)
+        self.ignore_errors = True
+        self.ignored_attributes = []
+        self.log_batch_size = 20
+        self.log_item_id = None
+        self.parent_item_id = None
+        self.rp = None
+        self.rp_supports_parameters = True
         # these tags are ignored during collection of test attributes
         # there are other rules for processing of these tags
         self._ignore_tag_prefixes = ["attribute", "fixture", "test_case_id"]
@@ -268,7 +280,8 @@ class BehaveAgent(metaclass=Singleton):
             )
         ]
         if step.exception:
-            message.append(", ".join(step.exception.args))
+            if step.exception.args:
+                message.append(", ".join(step.exception.args))
         if step.error_message:
             message.append(step.error_message)
 
