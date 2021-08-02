@@ -4,6 +4,7 @@ import os
 from functools import wraps
 from os import getenv
 import logging
+from six.moves import queue
 
 from prettytable import PrettyTable
 from reportportal_client import ReportPortalService
