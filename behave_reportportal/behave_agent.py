@@ -3,6 +3,8 @@ import mimetypes
 import os
 from functools import wraps
 from os import getenv
+import logging
+from six.moves import queue
 
 from prettytable import PrettyTable
 from reportportal_client import ReportPortalService
@@ -48,18 +50,40 @@ def create_rp_service(cfg):
 class BehaveAgent(metaclass=Singleton):
     """Functionality for integration of Behave tests with Report Portal."""
 
+    _loglevel_map = {
+        logging.NOTSET: 'TRACE',
+        logging.DEBUG: 'DEBUG',
+        logging.INFO: 'INFO',
+        logging.WARNING: 'WARN',
+        logging.ERROR: 'ERROR',
+        logging.CRITICAL: 'ERROR',
+    }
+    _sorted_levelnos = sorted(_loglevel_map.keys(), reverse=True)
+
     def __init__(self, cfg, rp_service=None):
         """Initialize instance attributes."""
-        self._rp = rp_service
         self._cfg = cfg
-        self._launch_id = None
+        self._errors = queue.Queue()
         self._feature_id = None
-        self._scenario_id = None
-        self._step_id = None
+        self._hier_parts = {}
+        self._issue_types = {}
+        self._item_parts = {}
+        self._launch_id = None
         self._log_item_id = None
+        self._loglevels = ('TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR')
+        self._rp = rp_service
+        self._scenario_id = None
         self._skip_analytics = getenv("AGENT_NO_ANALYTICS")
+        self._step_id = None
         self.agent_name = "behave-reportportal"
         self.agent_version = get_package_version(self.agent_name)
+        self.ignore_errors = True
+        self.ignored_attributes = []
+        self.log_batch_size = 20
+        self.log_item_id = None
+        self.parent_item_id = None
+        self.rp = None
+        self.rp_supports_parameters = True
         # these tags are ignored during collection of test attributes
         # there are other rules for processing of these tags
         self._ignore_tag_prefixes = ["attribute", "fixture", "test_case_id"]
@@ -179,46 +203,31 @@ class BehaveAgent(metaclass=Singleton):
         self._finish_step_scenario_based(step, **kwargs)
 
     @check_rp_enabled
-    def post_log(
-        self, message, level="INFO", item_id=None, file_to_attach=None
-    ):
-        """Post log message to current test item."""
-        self._log(
-            message,
-            level,
-            file_to_attach=file_to_attach,
-            item_id=item_id or self._log_item_id,
-        )
+    def post_log(self, message, loglevel='INFO', attachment=None):
+        """
+        Send a log message to the Report Portal.
+        :param message:    message in log body
+        :param loglevel:   a level of a log entry (ERROR, WARN, INFO, DEBUG,
+        TRACE, FATAL, UNKNOWN)
+        :param attachment: attachment file
+        :return: None
+        """
+        if self._rp is None:
+            return
 
-    @check_rp_enabled
-    def post_launch_log(self, message, level="INFO", file_to_attach=None):
-        """Post log message to launch."""
-        self._log(message, level, file_to_attach=file_to_attach)
+        if loglevel not in self._loglevels:
+            log.warning('Incorrect loglevel = %s. Force set to INFO. '
+                        'Available levels: %s.', loglevel, self._loglevels)
+            loglevel = 'INFO'
 
-    def _log(self, message, level, file_to_attach=None, item_id=None):
-        attachment = None
-        if file_to_attach:
-            with open(file_to_attach, "rb") as f:
-                attachment = {
-                    "name": os.path.basename(file_to_attach),
-                    "data": f.read(),
-                    "mime": mimetypes.guess_type(file_to_attach)[0]
-                    or "application/octet-stream",
-                }
-                self._rp.log(
-                    time=timestamp(),
-                    message=message,
-                    level=level,
-                    attachment=attachment,
-                    item_id=item_id,
-                )
-        self._rp.log(
-            time=timestamp(),
-            message=message,
-            level=level,
-            attachment=attachment,
-            item_id=item_id,
-        )
+        sl_rq = {
+            'item_id': self.log_item_id,
+            'time': timestamp(),
+            'message': message,
+            'level': loglevel,
+            'attachment': attachment
+        }
+        self._rp.log(**sl_rq)
 
     def _get_launch_attributes(self):
         """Return launch attributes in the format supported by the rp."""
@@ -272,7 +281,8 @@ class BehaveAgent(metaclass=Singleton):
             )
         ]
         if step.exception:
-            message.append(", ".join(step.exception.args))
+            if step.exception.args:
+                message.append(", ".join(step.exception.args))
         if step.error_message:
             message.append(step.error_message)
 
